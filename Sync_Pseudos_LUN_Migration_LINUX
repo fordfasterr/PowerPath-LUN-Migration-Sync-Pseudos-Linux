@@ -1,0 +1,108 @@
+Linux L2 - Arniella, Jan. 2016.
+
+sync pseudo's between 2 hosts with PowerPath: 
+
+Section A: Determine pseudo order between 2 nodes, run this on each node: 
+
+1. Generate list of all pseudo's and lun IDs: 
+
+	#powermt display dev=all|grep -i "pseudo\|clariion\|logical" > new_maps1
+	
+	It will look something like this: 
+
+		Pseudo name=emcpoweraq
+		CLARiiON ID=FNM00093800247 [useclqcll688db]
+		Logical device ID=60060160C6092600FC279EFC0A3DE311 [LUN 165 - useclqcll688dba-b - New /NBCOQ079_FB03]
+		....
+
+
+2. combine (the 3 lines at a time) into 1 line from the previous file: 
+
+	#cat new_maps1 | paste - - - > new_maps2
+
+	It will look something like this: 
+
+		Pseudo name=emcpoweraq  CLARiiON ID=FNM00093800247 [useclqcll688db]     Logical device ID=60060160C6092600FC279EFC0A3DE311 [LUN 165 - useclqcll688dba-b - New /NBCOQ079_FB03]
+
+
+3. Prepare a list of LUN ID's, no colons, and all uppercase into a file named: list
+	This is usually provided earlier by storage team during provisioning phase..
+	It will look something like this: 
+
+		#cat list
+		600601606EE031003F292A151F8AE511
+		600601606EE03100ADD9DCD51E8AE511
+		600601606EE0310039F715391F8AE511
+		....
+
+4. Extract the pseudo names in order: 
+
+	for i in `cat list`; do grep $i new_maps2|awk '{print $2}'; done
+	Now if you compare your LUN ID list with the new pseudo list between node A & B, 
+	you will see if they are in order or not.
+
+	You will end up with a list like this:
+
+		name=emcpowerbo
+		name=emcpowerbb
+		name=emcpowerbk
+		name=emcpowerbp
+		name=emcpowercg
+		....
+
+
+5. Final step, compare the outputs between node A & B, if they match you are done, if not, proceed to section B.
+
+
+Section B: Sync the pseudos using emcpadm utility.
+
+1. Export the mappings from node A, and copy it to Node B, run this on node A.
+	
+	emcpadm export_mappings -x -f mappingsa.txt   (-x is for xml format, easy to manually modify).
+
+2. Verify the mappings in node B.. Be sure you are not changing any of the OLD luns... 
+
+	emcpadm check_mappings -v -x -f mappingsa.txt
+
+	Output looks like this.. 
+
+		emcpowerx         no change    (These are old luns, not changed..)
+		emcpowerw         no change
+		emcpowery         no change
+		emcpowerbb        remaps: emcpowerbp  emcpowerbb   (these are new luns, will be changed...)
+		emcpowerbc        remaps: emcpowerbb  emcpowerbc
+		emcpowerbd        remaps: emcpowerbf  emcpowerbd
+
+
+3. Once verified, proceed to import the mappings ... 
+
+	emcpadm import_mappings -v -x -f mappingsa.txt
+
+	Output looks like this: 
+	
+		... Mapped emcpowerbb
+		... Mapped emcpowerbc
+		... Mapped emcpowerbd
+
+
+
+You may now repeat Section A to verify that the luns match between both nodes A & B.
+
+	Once you have a sync, your LUN ID's will match the Pseudo names on both nodes, as per below example (excel): 
+		LUN:					NodeA:		NodeB:
+		600601606EE031003F292A151F8AE511	emcpowerbo	emcpowerbo
+		600601606EE03100ADD9DCD51E8AE511	emcpowerbb	emcpowerbb
+		600601606EE0310039F715391F8AE511	emcpowerbk	emcpowerbk
+
+
+** Notes & thoughts: 
+
+1. Q: If you can get a list of possible remaps from Section B: step 2, why bother doing Section A? 
+   A: You've got to be 100% sure that you are not re-mapping any of the old LUNS.  Doing so will break Oracle, 
+	and possibly other filesystems... You can only get rid of the old LUNs once you have fully migrated
+	all of the data from them into the new luns.. So in this early stage you must not touch the old LUNs.
+
+2. 
+
+
+	
